@@ -1,0 +1,12 @@
+run: docker compose up -d && npm start
+
+seed: docker compose up -d
+
+test: npm test
+
+base_url: http://localhost:3000
+
+endpoints:
+  health: /health
+  generate: /generate
+  usage: /usage

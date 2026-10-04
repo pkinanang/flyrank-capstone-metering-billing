@@ -1,38 +1,81 @@
 const express = require("express");
+const { z } = require("zod");
+const tenantRepository = require("../repositories/tenant.repository");
+const { recordUsage } = require("../services/metering.service");
 const router = express.Router();
 
-// POST /api/generate - Metered AI generation endpoint
-router.post("/", (req, res) => {
-    const idempotencyKey = req.headers["idempotency-key"];
+const generateSchema = z.object({
+    input_tokens: z.number().int().nonnegative().default(0),
+    cached_input_tokens: z.number().int().nonnegative().default(0),
+    output_tokens: z.number().int().nonnegative().default(0),
+    reasoning_tokens: z.number().int().nonnegative().default(0),
+});
 
-    if (!idempotencyKey) {
-        return res.status(400).json({
-            error: "Idempotency key is required",
-            message: "Idempotency key is required to prevent duplicate requests"
+// POST /generate - Metered AI generation endpoint
+router.post("/", async (req, res, next) => {
+    try {
+        const tenantId = req.header("X-Tenant-ID") || req.header("x-tenant-id");
+        const idempotencyKey = req.header("Idempotency-Key") || req.header("idempotency-key");
+
+        // Validate Headers
+        if (!tenantId) {
+            return res.status(400).json({
+                error: "TENANT_ID_REQUIRED",
+                message: "Tenant ID is required to process request."
+            });
+        }
+
+        if (!idempotencyKey) {
+            return res.status(400).json({
+                error: "IDEMPOTENCY_KEY_REQUIRED",
+                message: "Idempotency key is required to prevent duplicate requests."
+            });
+        }
+
+        // Validate Tenant
+        const tenant = await tenantRepository.findTenantById(tenantId);
+        if (!tenant) {
+            return res.status(404).json({
+                error: "TENANT_NOT_FOUND",
+                message: "Tenant not found."
+            });
+        }
+
+        // Validate Body
+        const validation = generateSchema.safeParse(req.body);
+        if (!validation.success) {
+            return res.status(400).json({
+                error: "VALIDATION_ERROR",
+                details: validation.error.issues,
+            });
+        }
+
+        const {
+            input_tokens,
+            cached_input_tokens,
+            output_tokens,
+            reasoning_tokens
+        } = validation.data;
+
+        // Calculate total AI tokens
+        const aiTokens = input_tokens + cached_input_tokens + output_tokens + reasoning_tokens;
+
+        const result = await recordUsage({
+            tenantId,
+            idempotencyKey,
+            requestedUsage: {
+                apiCalls: 1,
+                ai_tokens: aiTokens,
+            },
         });
+
+        return res.status(result.statusCode).json(result.response);
+
+    } catch (error) {
+        next(error);
     }
-    //
-    const inputTokens = req.body.input_tokens ?? req.body.input_token ?? 0;
-    const cachedInputTokens = req.body.cached_input_tokens ?? req.body.cached_input_token ?? 0;
-    const outputTokens = req.body.output_tokens ?? req.body.output_token ?? 0;
-    const reasoningTokens = req.body.reasoning_tokens ?? 0;
-
-    const totalTokens = inputTokens + cachedInputTokens + outputTokens + reasoningTokens;
-
-    return res.status(200).json({
-        message: "Request processed successfully",
-        idempotency_key: idempotencyKey,
-        input_tokens: inputTokens,
-        cached_input_tokens: cachedInputTokens,
-        output_tokens: outputTokens,
-        reasoning_tokens: reasoningTokens,
-        total_tokens: totalTokens,
-    });
-
-
-
-
-
 });
 
 module.exports = router;
+
+
