@@ -10,3 +10,4 @@ endpoints:
   health: /health
   generate: /generate
   usage: /usage
+  billing: /billing/checkout

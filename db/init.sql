@@ -4,8 +4,8 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE TABLE IF NOT EXISTS plans (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     name VARCHAR(100) UNIQUE NOT NULL,
-    ai_token_limit BIGINT NOT NULL,
-    api_calls_limit INTEGER NOT NULL,
+    ai_token_limit BIGINT NOT NULL DEFAULT 0,
+    api_calls_limit INTEGER NOT NULL DEFAULT 0,
     monthly_price INTEGER NOT NULL DEFAULT 0,
     stripe_price_id VARCHAR(200),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -31,7 +31,10 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     current_period_start TIMESTAMP,
     current_period_end TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT unique_tenant_plan UNIQUE (tenant_id, plan_id),
+    CONSTRAINT unique_stripe_subscription_id UNIQUE (stripe_subscription_id)
 );
 
 -- Idempotency Records Table
