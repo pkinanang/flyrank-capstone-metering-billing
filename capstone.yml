@@ -11,3 +11,5 @@ endpoints:
   generate: /generate
   usage: /usage
   billing: /billing/checkout
+  simulate: /usage/simulate
+  webhook: /webhooks/stripe

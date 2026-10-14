@@ -126,3 +126,70 @@ Duplicate Event Handling:
 - The `subscriptions(stripe_subscription_id)` unique constraint ensures state transitions (upgrades, cancellations) update the existing subscription row rather than creating orphan duplicates.
 - Cryptographic signature validation protects the system against unauthorized billing tampering.
 
+---
+
+# Phase 4 — Token-Based Metering & Cost Tracking Evidence
+
+## Test: Usage Metering, Cost Calculation & Quota Enforcement
+
+### Scenario
+
+The metered simulation endpoint (`POST /usage/simulate`) receives AI inference requests authenticated via `X-Tenant-ID` and deduplicated by `Idempotency-Key`:
+
+1. **Token Estimation & Cost Calculation**: Prompt tokens are estimated and simulated output tokens are generated. Costs are computed dynamically according to the tenant plan's `input_price_per_million` and `output_price_per_million`.
+2. **Idempotency & Replay Protection**: Subsequent requests with the same `(tenant_id, idempotency_key)` are detected as duplicates.
+3. **Quota Limit Enforcement**: Requests exceeding the tenant plan's `monthly_token_limit` are blocked with HTTP 429.
+4. **Concurrent Request Race Conditions**: Simultaneous requests with identical idempotency keys are handled safely under transaction concurrency.
+
+### Expected Result
+
+The system must:
+
+1. **Calculate Granular Costs**: Record `input_tokens`, `output_tokens`, `total_tokens`, `input_cost`, `output_cost`, and `total_cost` in `usage_events`.
+2. **Prevent Double-Billing**: Return HTTP 200 with `{ duplicate: true }` on duplicate idempotency keys without inserting additional usage rows.
+3. **Enforce Monthly Token Limits**: Reject requests exceeding `monthly_token_limit` with HTTP 429 `{ error: "Monthly token limit exceeded" }` and zero database mutations.
+4. **Serialize Concurrent Invocations**: Use database row locking (`FOR UPDATE`) within PostgreSQL transactions (`BEGIN`/`COMMIT`) to ensure concurrent retries record exactly one usage event.
+
+### Test Result
+
+```text
+PASS tests/usage.integration.test.js
+  Phase 4 usage metering integration
+    ✓ 1. records token usage and calculates cost (47 ms)
+    ✓ 2. retrying the same idempotency key does not double-count (27 ms)
+    ✓ 3. exceeding the monthly quota is rejected without recording usage (18 ms)
+    ✓ 4. concurrent retries with the same key create one usage record (24 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       4 passed, 4 total
+```
+
+### Database Verification
+
+```text
+1. Token & Cost Recording:
+- usage_events count: 1
+- total_tokens: 21 (input: 8, output: 13)
+- total_cost: 0.00004700
+
+2. Idempotency Retries:
+- Request 1: HTTP 200 { success: true, duplicate: false }
+- Request 2 (Retry): HTTP 200 { success: true, duplicate: true }
+- usage_events count: 1 (no double-counting)
+
+3. Quota Exceeded Enforcement:
+- Response: HTTP 429 { error: "Monthly token limit exceeded" }
+- usage_events count: 0 (aborted before insert)
+
+4. Concurrent Retries:
+- Responses: [200, 200]
+- usage_events count for key: 1 (atomic serialization)
+```
+
+### Conclusion
+
+- Dynamic token-rate multiplication accurately bills input and output token consumption based on plan configuration.
+- Calendar-month aggregation (`date_trunc('month', NOW())`) enforces monthly quota limits before committing usage events.
+- Row-level subscription locking (`FOR UPDATE OF s`) alongside PostgreSQL transaction boundaries ensures concurrency safety and eliminates race conditions.
+
+

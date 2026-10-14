@@ -5,8 +5,11 @@ CREATE TABLE IF NOT EXISTS plans (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     name VARCHAR(100) UNIQUE NOT NULL,
     ai_token_limit BIGINT NOT NULL DEFAULT 0,
+    monthly_token_limit BIGINT NOT NULL DEFAULT 100000,
     api_calls_limit INTEGER NOT NULL DEFAULT 0,
     monthly_price INTEGER NOT NULL DEFAULT 0,
+    input_price_per_million NUMERIC(12, 6) NOT NULL DEFAULT 1.000000,
+    output_price_per_million NUMERIC(12, 6) NOT NULL DEFAULT 3.000000,
     stripe_price_id VARCHAR(200),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -53,8 +56,15 @@ CREATE TABLE IF NOT EXISTS idempotency_records (
 CREATE TABLE IF NOT EXISTS usage_events (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     tenant_id UUID NOT NULL REFERENCES tenants(id),
+    subscription_id UUID REFERENCES subscriptions(id) ON DELETE SET NULL,
     usage_type VARCHAR(50) NOT NULL,
     quantity BIGINT NOT NULL,
+    input_tokens BIGINT NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
+    output_tokens BIGINT NOT NULL CHECK (output_tokens >= 0) DEFAULT 0,
+    total_tokens BIGINT NOT NULL CHECK (total_tokens >= 0) DEFAULT 0,
+    input_cost NUMERIC(14, 8) NOT NULL DEFAULT 0.00000000,
+    output_cost NUMERIC(14, 8) NOT NULL DEFAULT 0.00000000,
+    total_cost NUMERIC(14, 8) NOT NULL DEFAULT 0.00000000,
     idempotency_key VARCHAR(255),
     request_id UUID REFERENCES idempotency_records(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -73,6 +83,8 @@ CREATE TABLE IF NOT EXISTS webhook_events (
 CREATE INDEX IF NOT EXISTS idx_usage_events_tenant ON usage_events(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_type ON usage_events(tenant_id, usage_type);
 CREATE INDEX IF NOT EXISTS idx_usage_events_created_at ON usage_events(created_at);
+CREATE INDEX IF NOT EXISTS usage_events_tenant_created_idx ON usage_events(tenant_id, created_at);
+CREATE INDEX IF NOT EXISTS subscriptions_tenant_status_idx ON subscriptions(tenant_id, status);
 
 -- Seed Free and Pro plan
 INSERT INTO plans (
